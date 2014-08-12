@@ -72,7 +72,7 @@ class POTGenerator:
         if code != 0:
             raise CreationError('Cannot create template.')
 
-        cmd = POTGenerator.CMP % (tmp_file.name, path)
+        cmd = POTGenerator.CMP % (path, tmp_file.name)
         code = subprocess.call(cmd, shell=True)
         if code == 0:
             raise NoChangesError('Nothing new for template.')
