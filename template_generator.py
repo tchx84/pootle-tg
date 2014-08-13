@@ -17,115 +17,133 @@
 # Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA  02110-1301 USA
 
 import os
-import shutil
-import fnmatch
 import logging
-import tempfile
 import subprocess
 
-from pootle_project.models import Project
-from pootle_misc import versioncontrol as pootle_vcs
+from ConfigParser import ConfigParser
+
 from pootle.scripts.actions import TranslationProjectAction
 
-from translate.storage import versioncontrol as store_vcs
 
 logger = logging.getLogger(__name__)
 
 
-class SourceFinder:
+class TemplateGenerator:
 
-    @staticmethod
-    def _find_files(root_path):
-        files = []
-        for path, dirs, names in os.walk(root_path):
-            for filename in fnmatch.filter(names, '*.py'):
-                files.append(os.path.join(path, filename))
-        return files
+    MSGCMP = "msgcmp %s %s "\
+             "--use-untranslated"
 
-    # TODO check po/POTFILES.in
-    @staticmethod
-    def find(root_path):
-        return SourceFinder._find_files(root_path)
+    MSGMERGE = "msgmerge %s %s "\
+               "--update "\
+               "--previous"
+
+    XGETTEXT = "xgettext %s "\
+               "--join-existing "\
+               "--language=Python "\
+               "--keyword=_ "\
+               "--output=%s"
+
+    INTLTOOL = "intltool-update "\
+               "--pot "\
+               "--gettext-package=new"
+
+    FIND = "echo $(find %s -iname \"*.py\")"
+
+    def __init__(self, ref, podir):
+        self._ref = ref
+        self._podir = podir
+        self._root = os.path.dirname(podir)
+        self._def = os.path.join(podir, 'new.pot')
+        self._potfiles = os.path.join(self._podir, 'POTFILES.in')
+        self._info = os.path.join(self._root, 'activity/activity.info')
+
+    def _changed(self):
+        cmd = self.MSGCMP % (self._ref, self._def)
+        return subprocess.call(cmd, shell=True) != 0
+
+    def _merge(self):
+        cmd = self.MSGMERGE % (self._ref, self._def)
+        subprocess.call(cmd, shell=True)
+
+    def _generate_activity(self):
+        info = ConfigParser()
+        info.read(self._info)
+
+        content = ''
+        for option in ['name', 'summary', 'description']:
+            if info.has_option('Activity', option):
+                content += 'msgid "%s"\n' % info.get('Activity', option)
+                content += 'msgstr ""\n\n'
+
+        if content:
+            with open(self._def, 'w') as file:
+                file.write(content)
+
+    def _generate_intltool(self):
+        os.chdir(self._root)
+        subprocess.call(self.INTLTOOL, shell=True)
+
+    def _generate_xgettext(self):
+        cmd = self.FIND % self._root
+        files = subprocess.check_output(cmd, shell=True)
+        cmd = self.XGETTEXT % (files.strip(), self._def)
+        subprocess.call(cmd, shell=True)
+
+    def generate(self):
+        # Remove previous attemps
+        if os.path.exists(self._def):
+            os.remove(self._def)
+
+        # Populate new.pot with activity.info
+        if os.path.exists(self._info):
+            self._generate_activity()
+
+        if os.path.exists(self._potfiles):
+            self._generate_intltool()
+        else:
+            self._generate_xgettext()
+
+    def update(self):
+        if not self._changed():
+            raise Exception('Template is up-to-date, no changes required.')
+        self._merge()
 
 
-class CreationError(Exception):
-    pass
-
-
-class NoChangesError(Exception):
-    pass
-
-
-class POTGenerator:
-
-    POT = "xgettext --language=Python --keyword=_ --keyword=N_ --output=%s %s"
-    CMP = 'msgcmp %s %s --use-untranslated'
-
-    @staticmethod
-    def generate(path, files):
-        tmp_file = tempfile.NamedTemporaryFile(delete=False)
-        tmp_file.close()
-
-        files_str = ' '.join(files)
-        cmd = POTGenerator.POT % (tmp_file.name, files_str)
-        code = subprocess.call(cmd, shell=True)
-        if code != 0:
-            raise CreationError('Cannot create template.')
-
-        cmd = POTGenerator.CMP % (path, tmp_file.name)
-        code = subprocess.call(cmd, shell=True)
-        if code == 0:
-            raise NoChangesError('Nothing new for template.')
-
-        shutil.copy(tmp_file.name, path)
-
-
-class TemplateGenerator(TranslationProjectAction):
-    """_
-    Generate a template file for a given project
+class TemplateUpdater(TranslationProjectAction):
+    """
+    Update template file for source code
     """
 
     def __init__(self, **kwargs):
-        super(TemplateGenerator, self).__init__(**kwargs)
+        super(TemplateUpdater, self).__init__(**kwargs)
         self.icon = 'icon-update-templates'
         self.permission = 'administrate'
 
     def run(self, **kwargs):
-        code = kwargs.get('project', None)
+        logger.warning(str(kwargs))
+
+        tp_dir = kwargs.get('tpdir')
+        po_dir = kwargs.get('root')
+        vcs_dir = kwargs.get('vc_root')
+
+        po_path = os.path.join(po_dir, tp_dir)
+        vcs_path = os.path.join(vcs_dir, tp_dir)
+        clone_path = os.path.realpath(vcs_path)
+        logger.warning(clone_path)
+
+        pot_name = "%s.%s" % (tp_dir, 'pot')
+        pot_path = os.path.join(po_path, pot_name)
+        logger.warning(pot_path)
 
         try:
-            project = Project.objects.get(code=code)
-        except:
-            self.set_error('Could not find project code %s' % str(code))
-            return
-
-        translation_project = project.get_template_translationproject()
-        stores = translation_project.stores.all()
-
-        if not stores:
-            return
-
-        store = stores[0]
-        path = store.file.name
-
-        pod_path = pootle_vcs.to_podir_path(path)
-        vcs_path = pootle_vcs.to_vcs_path(path)
-        vcs_object = store_vcs.get_versioned_object(vcs_path)
-        vcs_root_dir = vcs_object.root_dir
-
-        files = SourceFinder.find(vcs_root_dir)
-
-        try:
-            POTGenerator.generate(pod_path, files)
-        except (CreationError, NoChangesError) as e:
-            self.set_error(e.message)
-            return
-
-        message = 'Commit for updating template'
-        author = '%s <%s>' % ('Pootle daemon', 'pootle@pootle.sugarlabs.org')
-        pootle_vcs.commit_file(path, message=message, author=author)
-        self.set_output('%s has been updated and committed' % path)
+            generator = TemplateGenerator(pot_path, clone_path)
+            generator.generate()
+            generator.update()
+        except Exception as e:
+            self.set_error(str(e))
+        else:
+            self.set_error('Template has been updated.')
 
 category = "Manage"
-title = "Generate template"
-TemplateGenerator.gen = TemplateGenerator(category=category, title=title)
+title = "Update template"
+TemplateUpdater.gen = TemplateUpdater(category=category, title=title)
