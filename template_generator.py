@@ -80,7 +80,7 @@ class TemplateGenerator:
                 file.write(content)
 
     def _generate_intltool(self):
-        os.chdir(self._root)
+        os.chdir(self._podir)
         subprocess.call(self.INTLTOOL, shell=True)
 
     def _generate_xgettext(self):
