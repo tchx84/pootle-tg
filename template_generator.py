@@ -22,6 +22,7 @@ import subprocess
 
 from ConfigParser import ConfigParser
 
+from pootle_translationproject.models import TranslationProject
 from pootle.scripts.actions import TranslationProjectAction
 
 
@@ -111,7 +112,7 @@ class TemplateGenerator:
 
 class TemplateUpdater(TranslationProjectAction):
     """
-    Update template file for source code
+    Update source code, template and translations
     """
 
     def __init__(self, **kwargs):
@@ -121,6 +122,11 @@ class TemplateUpdater(TranslationProjectAction):
 
     def run(self, **kwargs):
         logger.warning(str(kwargs))
+
+        # update code before updating the template
+        directory = kwargs.get('path')
+        translation = TranslationProject.objects.get(directory=directory)
+        translation.update_dir(directory=directory)
 
         tp_dir = kwargs.get('tpdir')
         po_dir = kwargs.get('root')
@@ -141,9 +147,16 @@ class TemplateUpdater(TranslationProjectAction):
             generator.update()
         except Exception as e:
             self.set_error(str(e))
-        else:
-            self.set_error('Template has been updated.')
+            return
+
+        # update all translations with the new template
+        project = translation.project
+        translations = TranslationProject.objects.filter(project=project)
+        for translation in translations:
+            translation.update_against_templates()
+
+        self.set_error('All project\'s translations have been updated')
 
 category = "Manage"
-title = "Update template"
+title = "SUGAR: UPDATE _ALL_ FROM REPO SOURCE CODE"
 TemplateUpdater.gen = TemplateUpdater(category=category, title=title)
