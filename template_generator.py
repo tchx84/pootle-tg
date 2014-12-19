@@ -29,6 +29,13 @@ from pootle.scripts.actions import TranslationProjectAction
 logger = logging.getLogger(__name__)
 
 
+def _find_current_template(po_path): 
+    for filename in os.listdir(po_path):
+        if filename.endswith('.pot'):
+            return filename
+    return None
+
+
 class TemplateGenerator:
 
     MSGCMP = "msgcmp %s %s "\
@@ -137,7 +144,11 @@ class TemplateUpdater(TranslationProjectAction):
         clone_path = os.path.realpath(vcs_path)
         logger.warning(clone_path)
 
-        pot_name = "%s.%s" % (tp_dir, 'pot')
+        pot_name = _find_current_template(po_path)
+        if not pot_name:
+            self.set_error('Could not find current template')
+            return
+
         pot_path = os.path.join(po_path, pot_name)
         logger.warning(pot_path)
 
