@@ -29,7 +29,7 @@ from pootle.scripts.actions import TranslationProjectAction
 logger = logging.getLogger(__name__)
 
 
-def _find_current_template(po_path): 
+def _find_current_template(po_path):
     for filename in os.listdir(po_path):
         if filename.endswith('.pot'):
             return filename
@@ -66,14 +66,17 @@ class TemplateGenerator:
         self._info = os.path.join(self._root, 'activity/activity.info')
 
     def _changed(self):
+        logger.info('_changed')
         cmd = self.MSGCMP % (self._ref, self._def)
         return subprocess.call(cmd, shell=True) != 0
 
     def _merge(self):
+        logger.info('_merge')
         cmd = self.MSGMERGE % (self._ref, self._def)
-        subprocess.call(cmd, shell=True)
+        subprocess.check_call(cmd, shell=True)
 
     def _generate_activity(self):
+        logger.info('_generate_activity')
         info = ConfigParser()
         info.read(self._info)
 
@@ -88,19 +91,23 @@ class TemplateGenerator:
                 file.write(content)
 
     def _generate_intltool(self):
+        logger.info('_generate_intltool')
         os.chdir(self._podir)
-        subprocess.call(self.INTLTOOL, shell=True)
+        subprocess.check_call(self.INTLTOOL, shell=True)
 
     def _generate_xgettext(self):
+        logger.info('_generate_xgettext')
         cmd = self.FIND % self._root
         files = subprocess.check_output(cmd, shell=True)
         cmd = self.XGETTEXT % (files.strip(), self._def)
-        subprocess.call(cmd, shell=True)
+        subprocess.check_call(cmd, shell=True)
 
-    def generate(self):
-        # Remove previous attemps
+    def clean_up(self):
         if os.path.exists(self._def):
             os.remove(self._def)
+
+    def generate(self):
+        self.clean_up()
 
         # Populate new.pot with activity.info
         if os.path.exists(self._info):
@@ -112,9 +119,8 @@ class TemplateGenerator:
             self._generate_xgettext()
 
     def update(self):
-        if not self._changed():
-            raise Exception('Template is up-to-date, no changes required.')
-        self._merge()
+        if self._changed():
+            self._merge()
 
 
 class TemplateUpdater(TranslationProjectAction):
@@ -128,13 +134,25 @@ class TemplateUpdater(TranslationProjectAction):
         self.permission = 'administrate'
 
     def run(self, **kwargs):
-        logger.warning(str(kwargs))
+        logger.info(str(kwargs))
+        try:
+            self._update_all_from_vcs(**kwargs)
+            self._update_templates(**kwargs)
+            self._update_all_against_templates(**kwargs)
+        except Exception as e:
+            logger.error(str(e))
+            self.set_error(str(e))
+        else:
+            self.set_error('All translations were updated')
 
-        # update code before updating the template
+    def _update_all_from_vcs(self, **kwargs):
+        logger.info('_update_all_from_vcs')
         directory = kwargs.get('path')
         translation = TranslationProject.objects.get(directory=directory)
         translation.update_dir(directory=directory)
 
+    def _update_templates(self, **kwargs):
+        logger.info('_update_template')
         tp_dir = kwargs.get('tpdir')
         po_dir = kwargs.get('root')
         vcs_dir = kwargs.get('vc_root')
@@ -142,31 +160,35 @@ class TemplateUpdater(TranslationProjectAction):
         po_path = os.path.join(po_dir, tp_dir)
         vcs_path = os.path.join(vcs_dir, tp_dir)
         clone_path = os.path.realpath(vcs_path)
-        logger.warning(clone_path)
+        logger.info(clone_path)
 
         pot_name = _find_current_template(po_path)
         if not pot_name:
-            self.set_error('Could not find current template')
-            return
+            raise Exception('Could not find current template')
 
         pot_path = os.path.join(po_path, pot_name)
-        logger.warning(pot_path)
+        logger.info(pot_path)
 
         try:
             generator = TemplateGenerator(pot_path, clone_path)
             generator.generate()
             generator.update()
         except Exception as e:
-            self.set_error(str(e))
-            return
+            raise Exception(e)
+        finally:
+            generator.clean_up()
 
-        # update all translations with the new template
+    def _update_all_against_templates(self, **kwargs):
+        logger.info('_update_all_against_templates')
+        directory = kwargs.get('path')
+        translation = TranslationProject.objects.get(directory=directory)
         project = translation.project
+
         translations = TranslationProject.objects.filter(project=project)
         for translation in translations:
             translation.update_against_templates()
+        logger.info('_update_all_against_templates finished')
 
-        self.set_error('All project\'s translations have been updated')
 
 category = "Manage"
 title = "SUGAR: UPDATE _ALL_ FROM REPO SOURCE CODE"
