@@ -49,6 +49,7 @@ class TemplateGenerator:
                "--join-existing "\
                "--language=Python "\
                "--keyword=_ "\
+               "--add-comments=TRANS: "\
                "--output=%s"
 
     INTLTOOL = "intltool-update "\
@@ -83,6 +84,7 @@ class TemplateGenerator:
         content = ''
         for option in ['name', 'summary', 'description']:
             if info.has_option('Activity', option):
+                content += '#. TRANS: "%s" option from activity.info file\n' % option
                 content += 'msgid "%s"\n' % info.get('Activity', option)
                 content += 'msgstr ""\n\n'
 
