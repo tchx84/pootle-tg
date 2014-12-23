@@ -55,7 +55,7 @@ class TemplateGenerator:
                "--pot "\
                "--gettext-package=new"
 
-    FIND = "echo $(find %s -iname \"*.py\")"
+    FIND = "echo $(find . -iname \"*.py\")"
 
     def __init__(self, ref, podir):
         self._ref = ref
@@ -97,8 +97,8 @@ class TemplateGenerator:
 
     def _generate_xgettext(self):
         logger.info('_generate_xgettext')
-        cmd = self.FIND % self._root
-        files = subprocess.check_output(cmd, shell=True)
+        os.chdir(self._root)
+        files = subprocess.check_output(self.FIND, shell=True)
         cmd = self.XGETTEXT % (files.strip(), self._def)
         subprocess.check_call(cmd, shell=True)
 
