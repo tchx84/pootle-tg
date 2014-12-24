@@ -188,7 +188,10 @@ class TemplateUpdater(TranslationProjectAction):
 
         translations = TranslationProject.objects.filter(project=project)
         for translation in translations:
-            translation.update_against_templates()
+            if translation.stores.count():
+                translation.update_against_templates()
+            else:
+                logger.warning("%s has no stores", translation.get_absolute_url())
         logger.info('_update_all_against_templates finished')
 
 
