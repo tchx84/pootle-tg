@@ -56,6 +56,8 @@ class TemplateGenerator:
                "--pot "\
                "--gettext-package=new"
 
+    SANITIZE = "sed -i '/\"Plural-Forms:\ nplurals=INTEGER/d' %s"
+
     FIND = "echo $(find . -iname \"*.py\")"
 
     def __init__(self, ref, podir):
@@ -104,6 +106,11 @@ class TemplateGenerator:
         cmd = self.XGETTEXT % (files.strip(), self._def)
         subprocess.check_call(cmd, shell=True)
 
+    def _sanitize(self):
+        logger.info('_sanitize')
+        cmd = self.SANITIZE % self._def
+        subprocess.check_call(cmd, shell=True)
+
     def clean_up(self):
         if os.path.exists(self._def):
             os.remove(self._def)
@@ -119,6 +126,9 @@ class TemplateGenerator:
             self._generate_intltool()
         else:
             self._generate_xgettext()
+
+        # remove broken Plural-Forms if needed
+        self._sanitize()
 
     def update(self):
         if self._changed():
